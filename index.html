@@ -278,7 +278,8 @@ const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
-let isRecognitionActive = false;  // Track if recognition is currently active
+let isRecognitionActive = false;  // Flag tracking if recognition is active
+let recognitionStartTimeout = null; // To debounce recognition start
 let sessionId = null; // To store session ID for booking history
 
 function appendMsg(sender, text) {
@@ -289,31 +290,40 @@ function appendMsg(sender, text) {
   chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
+function safeStartRecognition() {
+  if (isListening && !isRecognitionActive) {
+    if (recognitionStartTimeout) clearTimeout(recognitionStartTimeout);
+    recognitionStartTimeout = setTimeout(() => {
+      if (isListening && !isRecognitionActive) {
+        try {
+          recognition.start();
+        } catch (e) {
+          if (e.name !== "InvalidStateError") {
+            console.error(e);
+          }
+          // Ignore InvalidStateError as it means recognition is already started
+        }
+      }
+    }, 100); // 100ms debounce delay
+  }
+}
+
 function playAudio(url, callback) {
   const audio = new Audio(url);
 
   audio.onended = () => {
     callback();
-    // Start recognition only if not already active and user wants to listen
-    if (isListening && !isRecognitionActive) {
-      recognition.start();
-    }
+    safeStartRecognition();
   };
 
   audio.onerror = () => {
     callback();
-    // Try to start recognition on audio error, but only if safe
-    if (isListening && !isRecognitionActive) {
-      recognition.start();
-    }
+    safeStartRecognition();
   };
 
   audio.play().catch(() => {
     callback();
-    // On play failure, also try to start recognition safely
-    if (isListening && !isRecognitionActive) {
-      recognition.start();
-    }
+    safeStartRecognition();
   });
 }
 
@@ -322,7 +332,7 @@ function sendToBot(text) {
   statusDiv.textContent = "Thinking...";
 
   const payload = { message: text };
-  if(sessionId) {
+  if (sessionId) {
     payload.session_id = sessionId; // send existing session ID if any
   }
 
@@ -331,28 +341,28 @@ function sendToBot(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   })
-  .then(res => res.json())
-  .then(data => {
-    if (data.response) {
-      appendMsg("bot", data.response);
+    .then(res => res.json())
+    .then(data => {
+      if (data.response) {
+        appendMsg("bot", data.response);
 
-      if(data.session_id) {
-        sessionId = data.session_id;
+        if (data.session_id) {
+          sessionId = data.session_id;
+        }
+        const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+        playAudio(fullAudioUrl, () => {
+          // always start recognition safely inside playAudio()
+        });
+
+        statusDiv.textContent = "";
+      } else {
+        statusDiv.textContent = "No response from server.";
       }
-      const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
-      playAudio(fullAudioUrl, () => {
-        // NO extra recognition.start() here - handled in playAudio()
-      });
-
-      statusDiv.textContent = "";
-    } else {
-      statusDiv.textContent = "No response from server.";
-    }
-  })
-  .catch(err => {
-    console.error("Error:", err);
-    statusDiv.textContent = "Server error";
-  });
+    })
+    .catch(err => {
+      console.error("Error:", err);
+      statusDiv.textContent = "Server error";
+    });
 }
 
 function setupRecognition() {
@@ -407,14 +417,12 @@ btn.addEventListener("click", () => {
     recognition.stop();
   } else {
     isListening = true;
-    if (!isRecognitionActive) {
-      recognition.start();
-    }
+    safeStartRecognition();
   }
 });
 
-// Initialize recognition on page load
 setupRecognition();
+
 
 
 </script>
