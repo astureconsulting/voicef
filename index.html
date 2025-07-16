@@ -278,114 +278,135 @@ const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
+let isRecognitionActive = false;  // New flag to track recognition state
 let sessionId = null; // To store session ID for booking history
 
 function appendMsg(sender, text) {
-const msg = document.createElement("div");
-msg.className = `msg ${sender}`;
-msg.textContent = text;
-chatDiv.appendChild(msg);
-chatDiv.scrollTop = chatDiv.scrollHeight;
+  const msg = document.createElement("div");
+  msg.className = `msg ${sender}`;
+  msg.textContent = text;
+  chatDiv.appendChild(msg);
+  chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
 function playAudio(url, callback) {
-const audio = new Audio(url);
-audio.onended = callback;
-audio.onerror = callback;
-audio.play().catch(callback);
+  const audio = new Audio(url);
+  audio.onended = () => {
+    callback();
+    // Only start recognition if it is not already running
+    if (isListening && !isRecognitionActive) {
+      recognition.start();
+    }
+  };
+  audio.onerror = () => {
+    callback();
+    // Also attempt to continue if error occurs
+    if (isListening && !isRecognitionActive) {
+      recognition.start();
+    }
+  };
+  audio.play().catch(() => {
+    // On play failure continue without restart to avoid error flood
+    callback();
+  });
 }
 
 function sendToBot(text) {
-appendMsg("user", text);
-statusDiv.textContent = "Thinking...";
+  appendMsg("user", text);
+  statusDiv.textContent = "Thinking...";
 
-const payload = { message: text };
-if(sessionId) {
-payload.session_id = sessionId; // send existing session ID if any
-}
+  const payload = { message: text };
+  if(sessionId) {
+    payload.session_id = sessionId; // send existing session ID if any
+  }
 
-fetch("https://web-production-b948f.up.railway.app/api/chat", {
-method: "POST",
-headers: { "Content-Type": "application/json" },
-body: JSON.stringify(payload),
-})
-.then(res => res.json())
-.then(data => {
-if (data.response) {
-appendMsg("bot", data.response);
+  fetch("https://web-production-b948f.up.railway.app/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.response) {
+      appendMsg("bot", data.response);
 
-// Save session ID for following requests
-if(data.session_id) {
-sessionId = data.session_id;
-}
-const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
-playAudio(fullAudioUrl, () => {
-if (isListening) recognition.start(); // continue conversation loop
-});
-statusDiv.textContent = "";
-} else {
-statusDiv.textContent = "No response from server.";
-}
-})
-.catch(err => {
-console.error("Error:", err);
-statusDiv.textContent = "Server error";
-});
+      // Save session ID for following requests
+      if(data.session_id) {
+        sessionId = data.session_id;
+      }
+      const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+      playAudio(fullAudioUrl, () => {
+        // Continue conversation only if still listening and recognition idle
+        if (isListening && !isRecognitionActive) recognition.start();
+      });
+      statusDiv.textContent = "";
+    } else {
+      statusDiv.textContent = "No response from server.";
+    }
+  })
+  .catch(err => {
+    console.error("Error:", err);
+    statusDiv.textContent = "Server error";
+  });
 }
 
 function setupRecognition() {
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SpeechRecognition) {
-statusDiv.textContent = "Speech Recognition not supported";
-btn.disabled = true;
-return;
-}
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    statusDiv.textContent = "Speech Recognition not supported";
+    btn.disabled = true;
+    return;
+  }
 
-recognition = new SpeechRecognition();
-recognition.lang = 'en-US';
-recognition.continuous = false;
-recognition.interimResults = false;
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.continuous = false;
+  recognition.interimResults = false;
 
-recognition.onstart = () => {
-statusDiv.textContent = "Listening... 🎙️";
-btn.textContent = "⏹️ Stop Conversation";
-btn.classList.add("listening");
-};
+  recognition.onstart = () => {
+    isRecognitionActive = true;
+    statusDiv.textContent = "Listening... 🎙️";
+    btn.textContent = "⏹️ Stop Conversation";
+    btn.classList.add("listening");
+  };
 
-recognition.onend = () => {
-if (!isListening) {
-statusDiv.textContent = "Stopped";
-btn.textContent = "▶️ Start Conversation";
-btn.classList.remove("listening");
-}
-};
+  recognition.onend = () => {
+    isRecognitionActive = false;
+    if (!isListening) {
+      statusDiv.textContent = "Stopped";
+      btn.textContent = "▶️ Start Conversation";
+      btn.classList.remove("listening");
+    }
+  };
 
-recognition.onerror = (event) => {
-console.error("Speech Recognition error:", event.error);
-statusDiv.textContent = "Error: " + event.error;
-recognition.stop();
-};
+  recognition.onerror = (event) => {
+    isRecognitionActive = false;
+    console.error("Speech Recognition error:", event.error);
+    statusDiv.textContent = "Error: " + event.error;
+    recognition.stop();
+  };
 
-recognition.onresult = (event) => {
-const transcript = event.results[0][0].transcript;
-if (transcript && isListening) {
-sendToBot(transcript);
-}
-};
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    if (transcript && isListening) {
+      sendToBot(transcript);
+    }
+  };
 }
 
 btn.addEventListener("click", () => {
-if (!recognition) return;
-if (isListening) {
-isListening = false;
-recognition.stop();
-} else {
-isListening = true;
-recognition.start();
-}
+  if (!recognition) return;
+  if (isListening) {
+    isListening = false;
+    recognition.stop();
+  } else {
+    isListening = true;
+    if (!isRecognitionActive) recognition.start();
+  }
 });
 
 setupRecognition();
+
 </script>
 </body>
 </html>
