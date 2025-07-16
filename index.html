@@ -88,7 +88,8 @@ const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
-let isRecognitionActive = false; // Flag to track recognition state
+let isRecognitionActive = false;
+let recognitionStartTimeout = null;
 
 function appendMsg(sender, text) {
   const msg = document.createElement("div");
@@ -98,11 +99,42 @@ function appendMsg(sender, text) {
   chatDiv.scrollTop = chatDiv.scrollHeight;
 }
 
+function safeStartRecognition() {
+  if (isListening && !isRecognitionActive) {
+    if (recognitionStartTimeout) {
+      clearTimeout(recognitionStartTimeout);
+    }
+    recognitionStartTimeout = setTimeout(() => {
+      try {
+        recognition.start();
+        console.log("Recognition started");
+      } catch (e) {
+        if (e.name !== "InvalidStateError") {
+          console.error("Error starting recognition:", e);
+        } else {
+          // Ignore this error - recognition already started
+          console.log("Recognition already started - ignoring.");
+        }
+      }
+    }, 100); // debounce delay
+  }
+}
+
 function playAudio(url, callback) {
   const audio = new Audio(url);
-  audio.onended = callback;
-  audio.onerror = callback;
-  audio.play().catch(callback);
+  audio.onended = () => {
+    callback();
+    safeStartRecognition();
+  };
+  audio.onerror = () => {
+    callback();
+    safeStartRecognition();
+  };
+  audio.play().catch((err) => {
+    console.error("Audio play failed:", err);
+    callback();
+    safeStartRecognition();
+  });
 }
 
 function sendToBot(text) {
@@ -113,25 +145,23 @@ function sendToBot(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: text }),
   })
-  .then(res => res.json())
-  .then(data => {
-    if (data.response) {
-      appendMsg("bot", data.response);
-      const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
-      playAudio(fullAudioUrl, () => {
-        if (isListening && !isRecognitionActive) {
-          recognition.start(); // Safely restart recognition only if it's not active
-        }
-      });
-      statusDiv.textContent = "";
-    } else {
-      statusDiv.textContent = "No response from server.";
-    }
-  })
-  .catch(err => {
-    console.error("Error:", err);
-    statusDiv.textContent = "Server error";
-  });
+    .then(res => res.json())
+    .then(data => {
+      if (data.response) {
+        appendMsg("bot", data.response);
+        const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+        playAudio(fullAudioUrl, () => {
+          // safeStartRecognition called inside playAudio
+        });
+        statusDiv.textContent = "";
+      } else {
+        statusDiv.textContent = "No response from server.";
+      }
+    })
+    .catch(err => {
+      console.error("Error:", err);
+      statusDiv.textContent = "Server error";
+    });
 }
 
 function setupRecognition() {
@@ -143,7 +173,7 @@ function setupRecognition() {
   }
 
   recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
+  recognition.lang = "en-US";
   recognition.continuous = false;
   recognition.interimResults = false;
 
@@ -186,9 +216,7 @@ btn.addEventListener("click", () => {
     recognition.stop();
   } else {
     isListening = true;
-    if (!isRecognitionActive) {
-      recognition.start();
-    }
+    safeStartRecognition();
   }
 });
 
