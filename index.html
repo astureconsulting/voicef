@@ -82,124 +82,126 @@
   </div>
 
 <script>
-const btn = document.getElementById("start-stop");
-const chatDiv = document.getElementById("chat");
-const statusDiv = document.getElementById("status");
+  const startBtn = document.getElementById("start-listening");
+  const chatDiv = document.getElementById("chat");
+  const statusDiv = document.getElementById("status");
 
-let isListening = false;
-let recognition = null;
+  let recognition;
+  let isListening = false;
+  let isResponding = false;
 
-function appendMsg(sender, text) {
-  const msg = document.createElement("div");
-  msg.className = `msg ${sender}`;
-  msg.textContent = text;
-  chatDiv.appendChild(msg);
-  chatDiv.scrollTop = chatDiv.scrollHeight;
-}
+  function appendMsg(sender, text) {
+    const msg = document.createElement("div");
+    msg.className = "msg " + sender;
+    msg.textContent = text;
+    chatDiv.appendChild(msg);
+    chatDiv.scrollTop = chatDiv.scrollHeight;
+  }
 
-function playAudio(url, callback) {
-  const audio = new Audio(url);
-  audio.onended = callback;
-  audio.onerror = callback;
-  audio.play().catch(callback);
-}
+  function playAudio(url, callback) {
+    if (!url) return callback?.();
+    const audio = new Audio(url);
+    isResponding = true;
 
-function sendToBot(text) {
-  appendMsg("user", text);
-  statusDiv.textContent = "Thinking...";
+    // Stop listening while audio is playing
+    recognition.stop();
 
-  fetch("https://web-production-b948f.up.railway.app/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: text }),
-  })
-    .then(async res => {
-      const contentType = res.headers.get("Content-Type") || "";
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Server error: ${errorText}`);
-      }
-      if (!contentType.includes("application/json")) {
-        const errorText = await res.text();
-        throw new Error(`Unexpected response: ${errorText}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (data.response) {
-        appendMsg("bot", data.response);
-        const fullAudioUrl = data.audio_url.startsWith("http")
-          ? data.audio_url
-          : "https://web-production-b948f.up.railway.app" + data.audio_url;
+    audio.play()
+      .then(() => console.log("✅ Audio playing:", url))
+      .catch(err => console.error("❌ Audio error:", err));
 
-        playAudio(fullAudioUrl, () => {
-          if (isListening) recognition.start(); // loop again
-        });
+    audio.onended = () => {
+      console.log("🔁 Audio ended");
+      isResponding = false;
+      setTimeout(() => {
+        if (isListening) {
+          console.log("🎤 Restarting listening after response...");
+          recognition.start();
+        }
+      }, 300);
+      callback?.();
+    };
+  }
 
+  if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = true; // ✅ Keep listening continuously
+
+    recognition.onstart = () => {
+      console.log("🎤 Listening...");
+      statusDiv.textContent = "🎤 Listening...";
+    };
+
+    recognition.onend = () => {
+      if (!isListening) {
+        console.log("🛑 User stopped assistant.");
+        startBtn.classList.remove("listening");
+        startBtn.textContent = "🎤 Start Conversation";
         statusDiv.textContent = "";
-      } else {
-        statusDiv.textContent = "No response from server.";
+      } else if (!isResponding) {
+        console.log("⏳ Mic stopped unexpectedly, restarting...");
+        recognition.start(); // fallback
       }
-    })
-    .catch(err => {
-      console.error("Error:", err);
-      statusDiv.textContent = "⚠️ " + err.message;
-    });
-}
+    };
 
-function setupRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    statusDiv.textContent = "Speech Recognition not supported";
-    btn.disabled = true;
-    return;
-  }
+    recognition.onerror = event => {
+      console.error("🚫 Speech error:", event.error);
+      statusDiv.textContent = "❌ Mic error: " + event.error;
+      if (isListening && !isResponding) {
+        setTimeout(() => recognition.start(), 500);
+      }
+    };
 
-  recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
-  recognition.continuous = false;
-  recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1][0].transcript.trim();
+      if (!transcript) return;
 
-  recognition.onstart = () => {
-    statusDiv.textContent = "Listening... 🎙️";
-    btn.textContent = "⏹️ Stop Conversation";
-    btn.classList.add("listening");
-  };
+      appendMsg("user", transcript);
+      statusDiv.textContent = "🤖 Thinking...";
 
-  recognition.onend = () => {
-    if (!isListening) {
-      statusDiv.textContent = "Stopped";
-      btn.textContent = "▶️ Start Conversation";
-      btn.classList.remove("listening");
-    }
-  };
+      recognition.stop(); // 🛑 Pause recognition while processing
 
-  recognition.onerror = (event) => {
-    console.error("Speech Recognition error:", event.error);
-    statusDiv.textContent = "Error: " + event.error;
-    recognition.stop();
-  };
+      fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: transcript })
+      })
+        .then(res => res.json())
+        .then(data => {
+          appendMsg("bot", data.response);
+          statusDiv.textContent = "🔊 Speaking...";
+          playAudio(data.audio_url);
+        })
+        .catch(err => {
+          console.error("❌ Server error:", err);
+          statusDiv.textContent = "❌ Response failed.";
+          if (isListening) recognition.start(); // retry listening
+        });
+    };
 
-  recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    if (transcript && isListening) {
-      sendToBot(transcript);
-    }
-  };
-}
-
-btn.addEventListener("click", () => {
-  if (!recognition) return;
-  if (isListening) {
-    isListening = false;
-    recognition.stop();
+    startBtn.onclick = () => {
+      if (!isListening) {
+        isListening = true;
+        startBtn.textContent = "🛑 Stop Conversation";
+        startBtn.classList.add("listening");
+        recognition.start();
+      } else {
+        isListening = false;
+        isResponding = false;
+        recognition.stop();
+        startBtn.textContent = "🎤 Start Conversation";
+        startBtn.classList.remove("listening");
+        statusDiv.textContent = "🛑 Assistant stopped.";
+      }
+    };
   } else {
-    isListening = true;
-    recognition.start();
+    startBtn.disabled = true;
+    statusDiv.textContent = "❌ Speech recognition not supported.";
   }
-});
-
-setupRecognition();
 </script>
+
 </body>
 </html>
