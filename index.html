@@ -88,6 +88,7 @@ const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
+let isRecognitionActive = false; // Flag to track recognition state
 
 function appendMsg(sender, text) {
   const msg = document.createElement("div");
@@ -117,8 +118,10 @@ function sendToBot(text) {
     if (data.response) {
       appendMsg("bot", data.response);
       const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
-        playAudio(fullAudioUrl, () => {
-        if (isListening) recognition.start(); // loop again
+      playAudio(fullAudioUrl, () => {
+        if (isListening && !isRecognitionActive) {
+          recognition.start(); // Safely restart recognition only if it's not active
+        }
       });
       statusDiv.textContent = "";
     } else {
@@ -145,12 +148,14 @@ function setupRecognition() {
   recognition.interimResults = false;
 
   recognition.onstart = () => {
+    isRecognitionActive = true;
     statusDiv.textContent = "Listening... 🎙️";
     btn.textContent = "⏹️ Stop Conversation";
     btn.classList.add("listening");
   };
 
   recognition.onend = () => {
+    isRecognitionActive = false;
     if (!isListening) {
       statusDiv.textContent = "Stopped";
       btn.textContent = "▶️ Start Conversation";
@@ -159,6 +164,7 @@ function setupRecognition() {
   };
 
   recognition.onerror = (event) => {
+    isRecognitionActive = false;
     console.error("Speech Recognition error:", event.error);
     statusDiv.textContent = "Error: " + event.error;
     recognition.stop();
@@ -174,12 +180,15 @@ function setupRecognition() {
 
 btn.addEventListener("click", () => {
   if (!recognition) return;
+
   if (isListening) {
     isListening = false;
     recognition.stop();
   } else {
     isListening = true;
-    recognition.start();
+    if (!isRecognitionActive) {
+      recognition.start();
+    }
   }
 });
 
@@ -187,6 +196,7 @@ setupRecognition();
 </script>
 </body>
 </html>
+
 
 <!-- <!DOCTYPE html>
 <html lang="en">
