@@ -319,8 +319,8 @@ function sendToBot(text) {
       if(data.session_id) {
         sessionId = data.session_id;
       }
-
-      playAudio(data.audio_url, () => {
+    const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+        playAudio(fullAudioUrl, () => {
         if (isListening) recognition.start(); // continue conversation loop
       });
       statusDiv.textContent = "";
