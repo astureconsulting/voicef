@@ -188,8 +188,7 @@ setupRecognition();
 </body>
 </html>
  -->
-
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -262,6 +261,20 @@ setupRecognition();
       font-size: 0.95em;
       color: #00e8ff;
     }
+    #manualPlayBtn {
+      background: #23cbe0;
+      border: none;
+      padding: 10px;
+      margin-top: 8px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #003c55;
+      transition: background-color 0.3s ease;
+    }
+    #manualPlayBtn:hover {
+      background-color: #1aa4be;
+    }
   </style>
 </head>
 <body>
@@ -270,16 +283,21 @@ setupRecognition();
     <div id="chat"></div>
     <div id="status"></div>
     <button id="start-stop">▶️ Start Conversation</button>
+
+    <!-- Manual play button for audio debugging -->
+    <button id="manualPlayBtn" title="Play last audio response manually">▶️ Play Last Audio</button>
   </div>
 
 <script>
 const btn = document.getElementById("start-stop");
+const manualPlayBtn = document.getElementById("manualPlayBtn");
 const chatDiv = document.getElementById("chat");
 const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
 let sessionId = null; // To store session ID for booking history
+let lastAudioUrl = null; // For manual play button
 
 function appendMsg(sender, text) {
   const msg = document.createElement("div");
@@ -290,18 +308,39 @@ function appendMsg(sender, text) {
 }
 
 function playAudio(url, callback) {
+  lastAudioUrl = url;
   const audio = new Audio(url);
   audio.onended = callback;
-  audio.onerror = callback;
-  audio.play().catch(callback);
+  audio.onerror = (e) => {
+    console.error("Audio playback error", e);
+    alert("Audio playback error occurred. See console for details.");
+    callback();
+  };
+  audio.play().catch((e) => {
+    console.error("Audio play() failed:", e);
+    alert("Failed to play audio. See console for details.");
+    callback();
+  });
 }
+
+manualPlayBtn.addEventListener("click", () => {
+  if (lastAudioUrl) {
+    const audio = new Audio(lastAudioUrl);
+    audio.play().catch(e => {
+      console.error("Manual play failed:", e);
+      alert("Failed to play audio manually. See console.");
+    });
+  } else {
+    alert("No audio available yet to play.");
+  }
+});
 
 function sendToBot(text) {
   appendMsg("user", text);
   statusDiv.textContent = "Thinking...";
 
   const payload = { message: text };
-  if(sessionId) {
+  if (sessionId) {
     payload.session_id = sessionId; // send existing session ID if any
   }
 
@@ -310,28 +349,33 @@ function sendToBot(text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   })
-  .then(res => res.json())
-  .then(data => {
-    if (data.response) {
-      appendMsg("bot", data.response);
+    .then(res => res.json())
+    .then(data => {
+      if (data.response) {
+        appendMsg("bot", data.response);
 
-      // Save session ID for following requests
-      if(data.session_id) {
-        sessionId = data.session_id;
-      }
-    const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+        // Save session ID for following requests
+        if (data.session_id) {
+          sessionId = data.session_id;
+        }
+
+        // Compose full audio URL
+        const baseApiUrl = "https://web-production-b948f.up.railway.app";
+        const audioPath = data.audio_url || "";
+        const fullAudioUrl = audioPath.startsWith("http") ? audioPath : baseApiUrl + audioPath;
+
         playAudio(fullAudioUrl, () => {
-        if (isListening) recognition.start(); // continue conversation loop
-      });
-      statusDiv.textContent = "";
-    } else {
-      statusDiv.textContent = "No response from server.";
-    }
-  })
-  .catch(err => {
-    console.error("Error:", err);
-    statusDiv.textContent = "Server error";
-  });
+          if (isListening) recognition.start(); // continue conversation loop
+        });
+        statusDiv.textContent = "";
+      } else {
+        statusDiv.textContent = "No response from server.";
+      }
+    })
+    .catch(err => {
+      console.error("Error:", err);
+      statusDiv.textContent = "Server error";
+    });
 }
 
 function setupRecognition() {
@@ -387,6 +431,7 @@ btn.addEventListener("click", () => {
 });
 
 setupRecognition();
+
 </script>
 </body>
 </html>
