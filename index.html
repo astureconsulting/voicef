@@ -116,7 +116,8 @@ function sendToBot(text) {
   .then(data => {
     if (data.response) {
       appendMsg("bot", data.response);
-      playAudio(data.audio_url, () => {
+      const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+        playAudio(fullAudioUrl, () => {
         if (isListening) recognition.start(); // loop again
       });
       statusDiv.textContent = "";
