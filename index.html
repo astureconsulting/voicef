@@ -278,7 +278,7 @@ const statusDiv = document.getElementById("status");
 
 let isListening = false;
 let recognition = null;
-let isRecognitionActive = false;  // New flag to track recognition state
+let isRecognitionActive = false;  // Track if recognition is currently active
 let sessionId = null; // To store session ID for booking history
 
 function appendMsg(sender, text) {
@@ -291,23 +291,29 @@ function appendMsg(sender, text) {
 
 function playAudio(url, callback) {
   const audio = new Audio(url);
+
   audio.onended = () => {
     callback();
-    // Only start recognition if it is not already running
+    // Start recognition only if not already active and user wants to listen
     if (isListening && !isRecognitionActive) {
       recognition.start();
     }
   };
+
   audio.onerror = () => {
     callback();
-    // Also attempt to continue if error occurs
+    // Try to start recognition on audio error, but only if safe
     if (isListening && !isRecognitionActive) {
       recognition.start();
     }
   };
+
   audio.play().catch(() => {
-    // On play failure continue without restart to avoid error flood
     callback();
+    // On play failure, also try to start recognition safely
+    if (isListening && !isRecognitionActive) {
+      recognition.start();
+    }
   });
 }
 
@@ -330,15 +336,14 @@ function sendToBot(text) {
     if (data.response) {
       appendMsg("bot", data.response);
 
-      // Save session ID for following requests
       if(data.session_id) {
         sessionId = data.session_id;
       }
       const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
       playAudio(fullAudioUrl, () => {
-        // Continue conversation only if still listening and recognition idle
-        if (isListening && !isRecognitionActive) recognition.start();
+        // NO extra recognition.start() here - handled in playAudio()
       });
+
       statusDiv.textContent = "";
     } else {
       statusDiv.textContent = "No response from server.";
@@ -396,16 +401,21 @@ function setupRecognition() {
 
 btn.addEventListener("click", () => {
   if (!recognition) return;
+
   if (isListening) {
     isListening = false;
     recognition.stop();
   } else {
     isListening = true;
-    if (!isRecognitionActive) recognition.start();
+    if (!isRecognitionActive) {
+      recognition.start();
+    }
   }
 });
 
+// Initialize recognition on page load
 setupRecognition();
+
 
 </script>
 </body>
