@@ -127,6 +127,7 @@ function playAudio(url, callback) {
     safeStartRecognition();
   };
   audio.onerror = () => {
+    console.error("Audio playback error for URL:", url);
     callback();
     safeStartRecognition();
   };
