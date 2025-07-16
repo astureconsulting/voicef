@@ -107,28 +107,44 @@ function playAudio(url, callback) {
 function sendToBot(text) {
   appendMsg("user", text);
   statusDiv.textContent = "Thinking...";
+
   fetch("https://web-production-b948f.up.railway.app/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: text }),
   })
-  .then(res => res.json())
-  .then(data => {
-    if (data.response) {
-      appendMsg("bot", data.response);
-      const fullAudioUrl = "https://web-production-b948f.up.railway.app" + data.audio_url;
+    .then(async res => {
+      const contentType = res.headers.get("Content-Type") || "";
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Server error: ${errorText}`);
+      }
+      if (!contentType.includes("application/json")) {
+        const errorText = await res.text();
+        throw new Error(`Unexpected response: ${errorText}`);
+      }
+      return res.json();
+    })
+    .then(data => {
+      if (data.response) {
+        appendMsg("bot", data.response);
+        const fullAudioUrl = data.audio_url.startsWith("http")
+          ? data.audio_url
+          : "https://web-production-b948f.up.railway.app" + data.audio_url;
+
         playAudio(fullAudioUrl, () => {
-        if (isListening) recognition.start(); // loop again
-      });
-      statusDiv.textContent = "";
-    } else {
-      statusDiv.textContent = "No response from server.";
-    }
-  })
-  .catch(err => {
-    console.error("Error:", err);
-    statusDiv.textContent = "Server error";
-  });
+          if (isListening) recognition.start(); // loop again
+        });
+
+        statusDiv.textContent = "";
+      } else {
+        statusDiv.textContent = "No response from server.";
+      }
+    })
+    .catch(err => {
+      console.error("Error:", err);
+      statusDiv.textContent = "⚠️ " + err.message;
+    });
 }
 
 function setupRecognition() {
